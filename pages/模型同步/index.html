@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型一键同步</title>
+<!-- AstrBot 会把这一行改写成带 asset_token 的地址。写在这里是为了让它先于下面的
+     业务脚本加载；如果不写，AstrBot 会把它追加到 </body> 之前，也就是我的脚本后面，
+     那样一进来 window.AstrBotPluginView 还不存在。 -->
+<script src="/api/plugin/page/bridge-sdk.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --text: #1b1b1f;
+    --muted: #6b6b74;
+    --line: #e4e4e9;
+    --accent: #3a6df0;
+    --ok: #1f8a4c;
+    --warn: #b06a00;
+    --bad: #c03434;
+  }
+  html[data-theme="dark"] {
+    --bg: #16161a;
+    --card: #1e1e24;
+    --text: #ececf1;
+    --muted: #9a9aa5;
+    --line: #2e2e36;
+    --accent: #7f9cff;
+    --ok: #4ecb7b;
+    --warn: #e0a44a;
+    --bad: #f07a7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 20px 22px 40px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 260px; flex: 1 1 320px; }
+  label.cap { font-size: 12px; color: var(--muted); }
+  select, button { font: inherit; }
+  select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+  }
+  button {
+    padding: 9px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  button.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.06); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .modes { display: flex; gap: 16px; flex-wrap: wrap; }
+  .modes label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .modes span.tip { color: var(--muted); font-size: 12px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
+  .stat { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; }
+  .stat b { font-size: 15px; }
+  .stat .k { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    border: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .pill.set { color: var(--accent); border-color: currentColor; }
+  .pill.same { color: var(--ok); border-color: currentColor; }
+  .pill.skip { color: var(--warn); border-color: currentColor; }
+  .empty { color: var(--muted); padding: 18px 0; text-align: center; }
+  .msg { margin: 0 0 10px; font-size: 13px; min-height: 1.6em; }
+  .msg.err { color: var(--bad); }
+  .msg.ok { color: var(--ok); }
+  .msg.info { color: var(--accent); }
+  .legend { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+  .legend em { font-style: normal; color: var(--warn); }
+</style>
+</head>
+<body>
+<h1>模型一键同步</h1>
+<p class="sub">换完对话模型，点一下，把还钉在旧模型上的地方一次改过来。改之前会整份备份。</p>
+
+<div class="card">
+  <div class="row">
+    <div class="field">
+      <label class="cap" for="target">要全部指向哪个模型（只列对话模型）</label>
+      <select id="target"></select>
+    </div>
+    <div class="field" style="flex:0 0 auto;min-width:0">
+      <label class="cap">改法</label>
+      <div class="modes">
+        <label><input type="radio" name="mode" value="all" checked> 全部统一</label>
+        <label><input type="radio" name="mode" value="fix"> 只修坏的</label>
+      </div>
+      <span class="tip">「只修坏的」只动指向已关闭/不存在模型的那些</span>
+    </div>
+  </div>
+  <div class="row" style="margin-top:16px">
+    <button id="btn-scan">重新扫描</button>
+    <button id="btn-dry">试运行</button>
+    <button id="btn-apply" class="primary">开始同步</button>
+    <button id="btn-restore">还原上一次</button>
+  </div>
+  <p class="hint" id="hint">正在读取配置…</p>
+</div>
+
+<div class="card">
+  <div class="stat">
+    <div><span class="k">当前主对话模型</span><br><b id="s-current">—</b></div>
+    <div><span class="k">要改</span><br><b id="s-pending">—</b></div>
+    <div><span class="k">不动</span><br><b id="s-skip">—</b></div>
+    <div><span class="k">上次备份</span><br><b id="s-backup">—</b></div>
+  </div>
+  <p class="msg" id="msg"></p>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:32%">位置</th>
+        <th style="width:9%">用途</th>
+        <th style="width:26%">现在钉着</th>
+        <th style="width:26%">改成</th>
+        <th style="width:7%">状态</th>
+      </tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="5" class="empty">还没有扫描结果</td></tr></tbody>
+  </table>
+  <p class="legend">只改「对话」和「看图」两类。<em>「向量记忆」「语音」是保护组</em>，永远不跟着换；bge-m3、SenseVoiceSmall 这类本地模型名也不会被碰。</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // AstrBot 把 bridge-sdk.js 追加在 </body> 之前，也就是排在本脚本后面。
+  // 所以不能一进来就取 window.AstrBotPluginView，要等它挂上。
+  function getBridge() {
+    return window.AstrBotPluginView || window.AstrBotPluginPage || null;
+  }
+
+  // 面板那边如果没回话（比如页面不在面板里），别让按钮一直卡在 disabled 上
+  function withTimeout(promise, label, ms) {
+    var limit = ms || 10000;
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) { return; }
+        settled = true;
+        reject(new Error(label + "：面板 " + Math.round(limit / 1000) + " 秒没回话，页面可能不是从面板里打开的"));
+      }, limit);
+      promise.then(function (value) {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }, function (error) {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+
+  function $(id) { return document.getElementById(id); }
+
+  function msg(text, kind) {
+    var el = $("msg");
+    el.textContent = text || "";
+    el.className = "msg" + (kind ? " " + kind : "");
+  }
+
+  function applyTheme(context) {
+    if (context && typeof context.isDark === "boolean") {
+      document.documentElement.setAttribute("data-theme", context.isDark ? "dark" : "light");
+    }
+  }
+
+  function currentMode() {
+    var picked = document.querySelector('input[name="mode"]:checked');
+    return picked ? picked.value : "all";
+  }
+
+  function fillSelect(providers, target) {
+    var sel = $("target");
+    sel.innerHTML = "";
+    if (!providers.length) {
+      var opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "（没有对话模型，先去「模型提供商」里打开一个）";
+      sel.appendChild(opt);
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    providers.forEach(function (item) {
+      var o = document.createElement("option");
+      o.value = item.id;
+      o.textContent = item.id + (item.enable ? "" : "（关着）") + (item.image ? " · 能看图" : "");
+      sel.appendChild(o);
+    });
+    sel.value = target || providers[0].id;
+  }
+
+  function renderRows(rows) {
+    var body = $("rows");
+    body.innerHTML = "";
+    if (!rows.length) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = '<td colspan="5" class="empty">没有发现任何模型引用，可能配置里一个都没钉</td>';
+      body.appendChild(tr);
+      return;
+    }
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      var label = document.createElement("td");
+      label.textContent = row.label;
+      var kind = document.createElement("td");
+      kind.textContent = row.kindZh;
+      var before = document.createElement("td");
+      before.className = "mono";
+      before.textContent = row.before || "(空)";
+      var after = document.createElement("td");
+      after.className = "mono";
+      after.textContent = row.action === "set" ? row.after : (row.reason || "—");
+      var st = document.createElement("td");
+      var pill = document.createElement("span");
+      pill.className = "pill " + row.action;
+      pill.textContent = row.action === "set" ? "要改" : (row.action === "same" ? "已一致" : "不动");
+      st.appendChild(pill);
+      tr.appendChild(label);
+      tr.appendChild(kind);
+      tr.appendChild(before);
+      tr.appendChild(after);
+      tr.appendChild(st);
+      body.appendChild(tr);
+    });
+  }
+
+  function paint(data) {
+    state.target = data.target || "";
+    state.providers = data.providers || [];
+    state.rows = data.rows || [];
+    fillSelect(state.providers, state.target);
+    renderRows(state.rows);
+    var skipped = state.rows.filter(function (r) { return r.action === "skip"; }).length;
+    $("s-current").textContent = data.current || "—";
+    $("s-pending").textContent = String(data.pending || 0);
+    $("s-skip").textContent = String(skipped);
+    $("s-backup").textContent = data.lastBackup || "还没有";
+    if (!data.pending) {
+      $("hint").textContent = "当前没有需要改动的地方。换了模型以后再点「重新扫描」。";
+    } else {
+      $("hint").textContent =
+        "将改动 " + data.pending + " 处。点「开始同步」先备份再写盘，写完自动重载受影响的插件。";
+    }
+    syncButtons();
+  }
+
+  function syncButtons() {
+    var pending = Number($("s-pending").textContent || 0);
+    ["btn-scan", "btn-dry", "btn-apply", "btn-restore"].forEach(function (id) {
+      $(id).disabled = state.busy;
+    });
+    if (!state.busy) {
+      $("btn-apply").disabled = !state.target || !(pending > 0);
+    }
+  }
+
+  function setBusy(flag) {
+    state.busy = flag;
+    syncButtons();
+  }
+
+  function scan() {
+    var api = getBridge();
+    if (!api || state.busy) { return; }
+    setBusy(true);
+    msg("正在扫描…", "info");
+    var picked = $("target").value || "";
+    withTimeout(api.apiGet("scan", { mode: currentMode(), target: picked }), "扫描").then(function (data) {
+      paint(data);
+      msg("");
+    }).catch(function (err) {
+      msg("扫描失败：" + (err && err.message ? err.message : err), "err");
+    }).then(function () {
+      setBusy(false);
+    });
+  }
+
+  function apply() {
+    var api = getBridge();
+    if (!api || state.busy) { return; }
+    var target = $("target").value;
+    if (!target) { msg("先选一个目标模型", "err"); return; }
+    setBusy(true);
+    msg("正在备份并写入…", "info");
+    withTimeout(api.apiPost("apply", { target: target, mode: currentMode(), reload: true }), "同步", 30000)
+      .then(function (data) {
+        var text = data.message || "改完了";
+        if (data.backup) { text += "；备份在 " + data.backup; }
+        var bad = (data.reloads || []).filter(function (r) { return !r.ok; });
+        if (bad.length) {
+          text += "；重载没成功：" + bad.map(function (r) { return r.name; }).join("、");
+        }
+        var failed = data.failed || [];
+        if (failed.length) { text += "；没改成：" + failed.join("、"); }
+        msg(text, failed.length || bad.length ? "err" : "ok");
+        if (data.rows) { renderRows(data.rows); }
+        $("s-backup").textContent = (data.backup || "").split(/[\\/]/).pop() || "—";
+      })
+      .catch(function (err) {
+        msg("同步失败：" + (err && err.message ? err.message : err), "err");
+      })
+      .then(function () {
+        setBusy(false);
+        setTimeout(scan, 1200);
+      });
+  }
+
+  function dry() {
+    var api = getBridge();
+    if (!api || state.busy) { return; }
+    var target = $("target").value;
+    if (!target) { msg("先选一个目标模型", "err"); return; }
+    setBusy(true);
+    msg("正在试运行（不写盘）…", "info");
+    withTimeout(api.apiPost("apply", { target: target, mode: currentMode(), reload: false, dryRun: true }), "试运行", 30000)
+      .then(function (data) {
+        var bad = data.failed || [];
+        msg(data.message + (bad.length ? "：" + bad.join("、") : ""), bad.length ? "err" : "ok");
+      })
+      .catch(function (err) {
+        msg("试运行失败：" + (err && err.message ? err.message : err), "err");
+      })
+      .then(function () { setBusy(false); });
+  }
+
+  function restore() {
+    var api = getBridge();
+    if (!api || state.busy) { return; }
+    setBusy(true);
+    msg("正在还原…", "info");
+    withTimeout(api.apiPost("restore", {}), "还原", 30000).then(function (data) {
+      msg(data.message || "还原完成", "ok");
+    }).catch(function (err) {
+      msg("还原失败：" + (err && err.message ? err.message : err), "err");
+    }).then(function () {
+      setBusy(false);
+      setTimeout(scan, 1200);
+    });
+  }
+
+  var state = { target: "", mode: "all", rows: [], providers: [], busy: false };
+
+  $("btn-scan").addEventListener("click", scan);
+  $("btn-dry").addEventListener("click", dry);
+  $("btn-apply").addEventListener("click", apply);
+  $("btn-restore").addEventListener("click", restore);
+  $("target").addEventListener("change", function () {
+    state.target = $("target").value;
+    scan();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (el) {
+    el.addEventListener("change", scan);
+  });
+  syncButtons();
+
+  var booted = false;
+  function boot(context) {
+    if (booted) { return; }
+    var api = getBridge();
+    if (!api) { return; }
+    booted = true;
+    applyTheme(context || (api.getContext ? api.getContext() : null));
+    scan();
+  }
+
+  function start() {
+    var api = getBridge();
+    if (!api) {
+      msg("这个页面要从面板里打开：插件管理 → 模型一键同步 → 打开页面。", "err");
+      return;
+    }
+    // 有上下文就先上，ready() 之后再来一次也无所谓（boot 只跑一次）
+    if (api.onContext) {
+      api.onContext(function (context) {
+        applyTheme(context);
+        boot(context);
+      });
+    }
+    try {
+      api.ready().then(function (context) {
+        applyTheme(context);
+        boot(context);
+      });
+    } catch (e) { /* 老版本没有 ready 也能靠下面的兜底 */ }
+    setTimeout(function () {
+      boot(api.getContext ? api.getContext() : null);
+      if (!booted) { msg("桥接已就绪但一直没收到面板上下文，试着直接扫一次。", "info"); }
+    }, 2500);
+  }
+
+  var tries = 0;
+  function waitBridge() {
+    if (getBridge()) { start(); return; }
+    if (++tries > 60) {
+      msg("没找到面板桥接接口（bridge-sdk.js 没加载上）。这个页面要在插件详情里点「打开页面」，直接粘地址打不开。", "err");
+      return;
+    }
+    setTimeout(waitBridge, 100);
+  }
+
+  if (document.readyState === "complete") { waitBridge(); }
+  else { window.addEventListener("load", waitBridge); }
+})();
+</script>
+</body>
+</html>

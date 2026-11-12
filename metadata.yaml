@@ -1,0 +1,30 @@
+name: astrbot_plugin_model_sync
+display_name: 模型一键同步
+short_desc: 换完模型点一下，把还指着旧模型的地方全改过去
+desc: 换完对话模型点一下，就把 AstrBot 自己的对话/看图/压缩模型、以及所有插件配置里还指着旧模型的 provider_id 一次改到新模型上。只改「对话」和「看图」两类，向量记忆和语音按用途归到保护组永远不动，bge-m3、SenseVoiceSmall 这类本地模型名一个都不碰。改前整份备份，改完自动重载受影响的插件，还能一键还原。
+version: 1.0.0
+author: mustumi9178
+repo: https://github.com/mustumi9178/astrbot_plugin_model_sync
+category: 工具
+tags:
+  - 模型
+  - 配置
+  - 运维
+  - 迁移
+  - provider
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - qq_official_webhook
+  - webchat
+astrbot_version: ">=4.20.0"
+help: |
+  面板：插件管理 → 模型一键同步 → 打开页面 → 点「开始同步」
+
+  聊天指令（管理员）：
+  - /模型同步         只列清单，不改
+  - /模型同步 执行     真的改，改前自动备份，改完重载被改的插件
+  - /模型同步 还原     回到上一次备份
+
+  只改「对话」和「看图」两类引用；向量记忆（bge-m3）、语音（Breeze）那几项按用途
+  归到保护组，永远不跟着换。bge-m3、SenseVoiceSmall 这类本地模型名一个都不碰。
